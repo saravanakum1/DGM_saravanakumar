@@ -1,16 +1,19 @@
-Tamil Newspaper / Tamil Text Book - TTS
+ECG-ADComparison - ECG Anomaly Detection Model Comparison Dashboard
 
-This app helps students converts tamil text book or newspapers to convert onto audio.
+A unified dashboard that focus on providing comparison report for ECG Anomaly detection using multiple deep generative 
+models with the below metrics
+
+1. Anomaly score
+2. Prediction
+3. Inference Time
+
+Models:
+
+1. VAE
+2. AR
+3. Score Based Models
+4. State Space Models
 
 **Dataset:**
 
-🎯 OpenSLR Tamil Speech Dataset (SLR-65)
 
-URL: https://www.openslr.org/65/
-
-What it contains:
-
-7 hours of transcribed Tamil speech
-50 native speakers
-Split: Female speakers + Male speakers
-High quality (16 kHz, 16-bit, mono, PCM)
