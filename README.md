@@ -16,4 +16,14 @@ Models:
 
 **Dataset:**
 
+MIMIC-IV ECG:
+
+URL: https://physionet.org/content/mimic-iv-ecg/1.0/
+
+PTB-XL:
+
+URL: https://physionet.org/content/ptb-xl/1.0.3/
+
+Initial training will be done on this dataset. Since it's a small dataset compare to former
+
 
