@@ -1,0 +1,34 @@
+[data]
+# Path to the downloaded PTB-XL dataset directory.
+# Run `uv run python src/data/download_dataset.py` to get this path,
+# then paste it here. For Colab, set to the path printed by that script.
+# PhysioNet PTB-XL 1.0.3 downloaded to dataset/
+# On Kaggle Notebooks: /kaggle/input/ptb-xl-a-large-publicly-available-electrocardiography-dataset/
+dataset_dir = "dataset"
+sampling_rate = 100
+val_split = 0.1
+
+[model]
+latent_dim = 128
+encoder_channels = [32, 64, 128]
+encoder_kernels = [7, 5, 3]
+encoder_strides = [2, 2, 2]
+beta = 1.0
+
+[training]
+epochs = 50
+batch_size = 64
+learning_rate = 1e-3
+# Device: "cpu", "cuda", or "mps" (Apple Silicon)
+device = "cpu"
+
+[anomaly]
+# Percentile of NORM val reconstruction errors used as the anomaly threshold.
+# Allowed values: 95 or 99
+threshold_percentile = 95
+
+[artifacts]
+output_dir = "artifacts"
+weights_file = "vae_weights.pt"
+loss_file = "vae_loss.json"
+norm_stats_file = "norm_stats.json"

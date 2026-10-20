@@ -1,0 +1,32 @@
+# Environment variables — contains Kaggle API credentials
+.env
+
+# Artifacts — model weights are large binaries, not tracked
+artifacts/*.pt
+artifacts/*.png
+
+# Dataset — downloaded via kagglehub, not tracked
+dataset/
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+dist/
+
+# Jupyter
+.ipynb_checkpoints/
+
+# IDE
+.idea/
+.vscode/
+
+# claude sessions
+claude_sessions/
+.python-version
+
+physionet.org/
+
+# OS
+.DS_Store
