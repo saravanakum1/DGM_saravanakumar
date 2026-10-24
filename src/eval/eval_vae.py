@@ -16,6 +16,7 @@ Outputs:
 
 import json
 import sys
+import time
 from pathlib import Path
 
 import matplotlib.pyplot as plt
@@ -32,6 +33,7 @@ from torch.utils.data import DataLoader
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 from backend.models.vae import VAE
+from src.data.download_dataset import get_dataset_path
 from backend.preprocess.pipeline import PTBXLDataset, build_splits, load_norm_stats
 
 CLASS_COLORS = {
@@ -51,10 +53,13 @@ def main():
     with open(config_path, "rb") as f:
         config = tomllib.load(f)
 
-    dataset_dir = config["data"]["dataset_dir"]
+    dataset_dir = get_dataset_path()
     fs = config["data"]["sampling_rate"]
     batch_size = config["training"]["batch_size"]
-    device = torch.device(config["training"]["device"])
+    _device_cfg = config["training"]["device"]
+    if _device_cfg == "cpu" and torch.cuda.is_available():
+        _device_cfg = "cuda"
+    device = torch.device(_device_cfg)
     output_dir = Path(config["artifacts"]["output_dir"])
     weights_path = output_dir / config["artifacts"]["weights_file"]
     norm_stats_path = output_dir / config["artifacts"]["norm_stats_file"]
@@ -79,12 +84,34 @@ def main():
     model.eval()
     print(f"Loaded weights from {weights_path}")
 
-    # Build test set
-    _, _, test_records = build_splits(config)
+    # Load or build test splits from same cache as training
+    KAGGLE_CODE_PATH = Path("/kaggle/input/datasets/sharav95/ecg-ad-comparison/artifacts")
+    splits_cache = output_dir / "splits_cache.json"
+    bundled_splits = KAGGLE_CODE_PATH / "splits_cache.json"
+
+    if bundled_splits.exists():
+        print(f"Loading cached splits from {bundled_splits}")
+        with open(bundled_splits) as f:
+            _splits = json.load(f)
+        test_records = [tuple(r) for r in _splits["test"]]
+    elif splits_cache.exists():
+        print(f"Loading cached splits from {splits_cache}")
+        with open(splits_cache) as f:
+            _splits = json.load(f)
+        test_records = [tuple(r) for r in _splits["test"]]
+    else:
+        print("Building dataset splits (slow — run train_vae.py first to cache)...")
+        _, _, test_records = build_splits(config, dataset_dir=dataset_dir)
+
     print(f"Test set: {len(test_records)} records")
 
+    print("Preloading test signals into RAM...")
+    t0 = time.time()
     test_ds = PTBXLDataset(test_records, dataset_dir, norm_stats=norm_stats, fs=fs)
-    test_loader = DataLoader(test_ds, batch_size=batch_size, shuffle=False, num_workers=2)
+    print(f"  {len(test_ds)} signals loaded ({test_ds.signals.nbytes / 1e6:.0f} MB) in {time.time()-t0:.1f}s")
+
+    pin_memory = torch.cuda.is_available()
+    test_loader = DataLoader(test_ds, batch_size=batch_size, shuffle=False, num_workers=0, pin_memory=pin_memory)
 
     # Run inference
     all_scores, all_labels = [], []

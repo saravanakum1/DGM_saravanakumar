@@ -10,8 +10,11 @@ class Encoder(nn.Module):
         super().__init__()
         in_ch = 12
         layers = []
-        for out_ch, k, s in zip(channels, kernels, strides):
-            layers += [nn.Conv1d(in_ch, out_ch, kernel_size=k, stride=s), nn.ReLU()]
+        all_out = list(channels)
+        for i, (out_ch, k, s) in enumerate(zip(all_out, kernels, strides)):
+            layers.append(nn.Conv1d(in_ch, out_ch, kernel_size=k, stride=s))
+            if i < len(all_out) - 1:
+                layers.append(nn.ReLU())
             in_ch = out_ch
         self.conv = nn.Sequential(*layers)
 
@@ -27,7 +30,9 @@ class Encoder(nn.Module):
     def forward(self, x: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
         h = self.conv(x)
         h = h.view(h.size(0), -1)
-        return self.fc_mu(h), self.fc_logvar(h)
+        mu = self.fc_mu(h)
+        logvar = self.fc_logvar(h).clamp(-4.0, 4.0)
+        return mu, logvar
 
 
 class Decoder(nn.Module):
@@ -40,15 +45,17 @@ class Decoder(nn.Module):
         dec_kernels = list(reversed(kernels))
         dec_strides = list(reversed(strides))
 
-        self.fc = nn.Sequential(nn.Linear(latent_dim, flat_size), nn.ReLU())
+        self.fc = nn.Linear(latent_dim, flat_size)
         self._reshape_ch = dec_channels[0]
         self._reshape_len = flat_size // dec_channels[0]
 
         layers = []
         in_ch = dec_channels[0]
-        for i, (out_ch, k, s) in enumerate(zip(dec_channels[1:] + [12], dec_kernels, dec_strides)):
-            activation = nn.ReLU() if i < len(dec_channels) - 1 else nn.Tanh()
-            layers += [nn.ConvTranspose1d(in_ch, out_ch, kernel_size=k, stride=s), activation]
+        all_out = dec_channels[1:] + [12]
+        for i, (out_ch, k, s) in enumerate(zip(all_out, dec_kernels, dec_strides)):
+            layers.append(nn.ConvTranspose1d(in_ch, out_ch, kernel_size=k, stride=s))
+            if i < len(all_out) - 1:
+                layers.append(nn.ReLU())
             in_ch = out_ch
         self.deconv = nn.Sequential(*layers)
 

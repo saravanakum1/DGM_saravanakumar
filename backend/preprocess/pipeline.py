@@ -2,6 +2,7 @@ import ast
 import json
 import os
 from pathlib import Path
+from multiprocessing import Pool, cpu_count
 
 import numpy as np
 import pandas as pd
@@ -104,15 +105,21 @@ def _extract_superclass(scp_codes_str: str, lookup: dict[str, str]) -> str | Non
 # Split building
 # ---------------------------------------------------------------------------
 
-def build_splits(config: dict) -> tuple[list, list, list]:
+def build_splits(config: dict, dataset_dir: str | None = None) -> tuple[list, list, list]:
     """Build train / val / test record lists from PTB-XL metadata.
+
+    Args:
+        config: loaded config.toml dict
+        dataset_dir: override dataset path (e.g. from get_dataset_path()).
+                     Falls back to config["data"]["dataset_dir"] if not provided.
 
     Returns:
         train_records: list of (filename_lr, "NORM") — NORM only, folds 1-9
         val_records:   list of (filename_lr, "NORM") — NORM only, held-out fraction
         test_records:  list of (filename_lr, superclass) — all classes, fold 10
     """
-    dataset_dir = config["data"]["dataset_dir"]
+    if dataset_dir is None:
+        dataset_dir = config["data"]["dataset_dir"]
     val_split = config["data"]["val_split"]
 
     db_path = Path(dataset_dir) / "ptbxl_database.csv"
@@ -206,11 +213,28 @@ def normalize(signal: np.ndarray, stats: dict) -> np.ndarray:
 
 
 # ---------------------------------------------------------------------------
+# Parallel loading helper (module-level so multiprocessing can pickle it)
+# ---------------------------------------------------------------------------
+
+def _load_one(args: tuple) -> np.ndarray:
+    """Load, filter, and optionally normalize a single record. Returns (12, 1000) float32."""
+    record_path, norm_stats, fs = args
+    sig = load_record(record_path)
+    sig = bandpass_filter(sig, fs=fs)
+    if norm_stats is not None:
+        sig = normalize(sig, norm_stats)
+    return sig
+
+
+# ---------------------------------------------------------------------------
 # Dataset
 # ---------------------------------------------------------------------------
 
 class PTBXLDataset(Dataset):
     """PyTorch Dataset for PTB-XL records.
+
+    Preloads all signals into RAM on init — bandpass filtering and normalization
+    are applied once at load time so each epoch reads from memory, not disk.
 
     Args:
         records: list of (filename_lr, superclass_label)
@@ -225,23 +249,21 @@ class PTBXLDataset(Dataset):
         dataset_dir: str,
         norm_stats: dict | None = None,
         fs: int = 100,
+        num_workers: int | None = None,
     ):
-        self.records = records
-        self.dataset_dir = dataset_dir
-        self.norm_stats = norm_stats
-        self.fs = fs
+        self.labels = [label for _, label in records]
+        args = [
+            (str(Path(dataset_dir) / filename_lr), norm_stats, fs)
+            for filename_lr, _ in records
+        ]
+        n_workers = num_workers if num_workers is not None else min(cpu_count(), 8)
+        print(f"  Loading {len(args)} records using {n_workers} CPU cores...", flush=True)
+        with Pool(processes=n_workers) as pool:
+            signals = pool.map(_load_one, args)
+        self.signals = torch.from_numpy(np.stack(signals, axis=0))  # (N, 12, 1000)
 
     def __len__(self) -> int:
-        return len(self.records)
+        return len(self.labels)
 
     def __getitem__(self, idx: int) -> tuple[torch.Tensor, str]:
-        filename_lr, label = self.records[idx]
-        record_path = str(Path(self.dataset_dir) / filename_lr)
-
-        signal = load_record(record_path)
-        signal = bandpass_filter(signal, fs=self.fs)
-
-        if self.norm_stats is not None:
-            signal = normalize(signal, self.norm_stats)
-
-        return torch.from_numpy(signal), label
+        return self.signals[idx], self.labels[idx]
