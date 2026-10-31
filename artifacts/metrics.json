@@ -4,5 +4,11 @@
     "pr_auc": 0.8188847422851291,
     "threshold": 1.2148730158805847,
     "threshold_percentile": 95
+  },
+  "DDPM": {
+    "auroc": 0.7432231024511828,
+    "pr_auc": 0.8134620583867851,
+    "threshold": 0.23563364893198013,
+    "threshold_percentile": 95
   }
 }

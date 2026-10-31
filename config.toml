@@ -27,6 +27,14 @@ device = "cpu"
 # Allowed values: 95 or 99
 threshold_percentile = 95
 
+[ddpm]
+T = 1000
+beta_start = 1e-4
+beta_end = 0.02
+t_star = 200
+vlb = false
+ema_decay = 0.9999
+
 [artifacts]
 output_dir = "artifacts"
 weights_file = "vae_weights.pt"

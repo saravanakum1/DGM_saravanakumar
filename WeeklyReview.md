@@ -10,4 +10,11 @@ Week 3:
 
 Dashboard architecture
 Model Architecture
-First Model - VAE Implementation, Training and Evaluation, Plots Done
+
+Week 4: 
+
+VAE Training and validation Implementation
+
+Dashboard Implementation
+
+DDPM Training and validation Implementation
