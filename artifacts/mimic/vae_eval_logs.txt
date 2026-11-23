@@ -1,0 +1,14 @@
+Loaded weights from artifacts/mimic/vae_weights.pt
+Loading cached splits from artifacts/mimic/splits_cache.json
+Test set: 78289 records (sorted by npz for sequential I/O)
+  MIMICDataset: 78289 records (lazy loading)
+VAE eval: 100%|██████████████████████████| 1224/1224 [15:13<00:00,  1.34batch/s]
+AUROC: 0.8812
+PR-AUC: 0.9833
+PR curve saved to artifacts/mimic/vae_pr_curve.png
+Score distribution saved to artifacts/mimic/vae_score_distribution.png
+  AUROC AF vs NORM: 0.9915
+  AUROC ST vs NORM: 0.8836
+  AUROC OTHER vs NORM: 0.8639
+Per-class AUROC chart saved to artifacts/mimic/vae_per_class_auroc.png
+Metrics saved to artifacts/mimic/metrics.json

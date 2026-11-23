@@ -1,0 +1,25 @@
+{
+  "VAE": {
+    "auroc": 0.8812427183032094,
+    "pr_auc": 0.9832576619854763,
+    "threshold": 0.36026972532272333,
+    "threshold_percentile": 95,
+    "per_class_auroc": {
+      "AF": 0.9914946085209497,
+      "ST": 0.8835713852302395,
+      "OTHER": 0.8639455640905298
+    }
+  },
+  "DDPM": {
+    "auroc": 0.7325374663502743,
+    "pr_auc": 0.9545104142040117,
+    "threshold": 0.040969963744282724,
+    "threshold_percentile": 95,
+    "per_class_auroc": {
+      "NORMAL": NaN,
+      "AF": NaN,
+      "ST": NaN,
+      "OTHER": NaN
+    }
+  }
+}
