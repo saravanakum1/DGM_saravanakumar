@@ -1,58 +1,63 @@
-"""
-Resolves the PTB-XL dataset path for both local and Kaggle environments.
+"""Resolves the dataset path for both local and Kaggle environments.
 
-- On Kaggle Notebooks: returns /kaggle/input/ecg-ptbxl-data (already mounted, no download)
-- Local: returns dataset_dir from config.toml
+- On Kaggle: returns the mounted Kaggle input path for the configured dataset.
+- Local: returns dataset_dir from config.toml.
 
 Usage:
     uv run python src/data/download_dataset.py   # prints resolved path
 
 Import in other scripts:
     from src.data.download_dataset import get_dataset_path
-    dataset_dir = get_dataset_path()
+    dataset_dir = get_dataset_path(config)
 """
 
 from pathlib import Path
 
 
-KAGGLE_DATA_PATH = "/kaggle/input/datasets/sharav95/ecg-ptbxl-data"
+def get_dataset_path(config: dict | None = None) -> str:
+    """Return the dataset directory path for the current environment.
 
-
-def get_dataset_path() -> str:
-    """Return the PTB-XL dataset path for the current environment.
-
-    On Kaggle Notebooks: returns the mounted ecg-ptbxl-data input path.
-    Locally: reads dataset_dir from config.toml.
+    Args:
+        config: pre-loaded config dict. If None, loads config.toml from repo root.
     """
-    if Path(KAGGLE_DATA_PATH).exists():
-        return KAGGLE_DATA_PATH
+    if config is None:
+        import tomllib
+        config_path = Path(__file__).resolve().parents[2] / "config.toml"
+        if not config_path.exists():
+            raise FileNotFoundError(f"config.toml not found at {config_path}")
+        with open(config_path, "rb") as f:
+            config = tomllib.load(f)
 
-    config_path = Path(__file__).resolve().parents[2] / "config.toml"
-    if not config_path.exists():
-        raise FileNotFoundError(f"config.toml not found at {config_path}")
+    from backend.preprocess.registry import get_spec
+    spec = get_spec(config)
 
-    import tomllib
-    with open(config_path, "rb") as f:
-        config = tomllib.load(f)
+    if Path(spec.kaggle_input_path).exists():
+        return spec.kaggle_input_path
 
     path = config["data"]["dataset_dir"]
     if not Path(path).exists():
         raise FileNotFoundError(
             f"dataset_dir '{path}' does not exist. "
-            "Update config.toml [data] dataset_dir to point to your local PTB-XL folder."
+            f"Update config.toml [data] dataset_dir to point to your local "
+            f"{config['data'].get('name', 'ptbxl')} folder."
         )
     return path
 
 
 def main():
     path = get_dataset_path()
-    print(f"PTB-XL dataset path: {path}")
-    required = ["ptbxl_database.csv", "scp_statements.csv", "records100"]
-    missing = [f for f in required if not (Path(path) / f).exists()]
+    print(f"Dataset path: {path}")
+    import tomllib
+    config_path = Path(__file__).resolve().parents[2] / "config.toml"
+    with open(config_path, "rb") as f:
+        config = tomllib.load(f)
+    from backend.preprocess.registry import get_spec
+    spec = get_spec(config)
+    missing = [f for f in spec.required_local_files if not (Path(path) / f).exists()]
     if missing:
         print(f"WARNING: missing expected files/dirs: {missing}")
     else:
-        print("OK: ptbxl_database.csv, scp_statements.csv, records100/ all present")
+        print(f"OK: {', '.join(spec.required_local_files)} all present")
 
 
 if __name__ == "__main__":

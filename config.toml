@@ -1,11 +1,10 @@
 [data]
-# Path to the downloaded PTB-XL dataset directory.
-# Run `uv run python src/data/download_dataset.py` to get this path,
-# then paste it here. For Colab, set to the path printed by that script.
-# PhysioNet PTB-XL 1.0.3 downloaded to dataset/
-# On Kaggle Notebooks: /kaggle/input/ptb-xl-a-large-publicly-available-electrocardiography-dataset/
-dataset_dir = "dataset"
-sampling_rate = 100
+# Dataset to use. Supported: "ptbxl", "mimic-iv-ecg"
+# Switching this value is the only change needed to train on a different dataset.
+name = "mimic-iv-ecg"
+# On Kaggle: attach sharav95/ecg-npy-batches as input dataset
+dataset_dir = "/kaggle/input/datasets/sharav95/ecg-npy-batches"
+sampling_rate = 500
 val_split = 0.1
 
 [model]
@@ -20,7 +19,7 @@ epochs = 50
 batch_size = 64
 learning_rate = 1e-3
 # Device: "cpu", "cuda", or "mps" (Apple Silicon)
-device = "cpu"
+device = "cuda"
 
 [anomaly]
 # Percentile of NORM val reconstruction errors used as the anomaly threshold.
@@ -28,15 +27,33 @@ device = "cpu"
 threshold_percentile = 95
 
 [ddpm]
-T = 1000
+T = 500
 beta_start = 1e-4
 beta_end = 0.02
-t_star = 200
+t_star = 20
 vlb = false
 ema_decay = 0.9999
+
+[ddpm_training]
+epochs = 15
+batch_size = 64
+learning_rate = 2e-4
 
 [artifacts]
 output_dir = "artifacts"
 weights_file = "vae_weights.pt"
 loss_file = "vae_loss.json"
 norm_stats_file = "norm_stats.json"
+
+[flow_matching]
+epochs = 10
+batch_size = 64
+lr = 2e-4
+weight_decay = 1e-4
+grad_clip = 1.0
+ema_decay = 0.9999
+time_dim = 128
+num_steps = 50
+n_hutchinson = 1
+score_samples = 50
+threshold_percentile = 95

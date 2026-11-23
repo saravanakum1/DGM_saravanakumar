@@ -19,6 +19,8 @@ import sys
 import time
 from pathlib import Path
 
+from tqdm import tqdm
+
 import matplotlib.pyplot as plt
 import numpy as np
 import tomllib
@@ -34,15 +36,9 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 from backend.models.vae import VAE
 from src.data.download_dataset import get_dataset_path
-from backend.preprocess.pipeline import PTBXLDataset, build_splits, load_norm_stats
-
-CLASS_COLORS = {
-    "NORM": "#22C55E",
-    "MI":   "#EF4444",
-    "STTC": "#F97316",
-    "CD":   "#EAB308",
-    "HYP":  "#A855F7",
-}
+from backend.preprocess.registry import get_spec
+from backend.preprocess.pipeline import load_norm_stats
+from backend.preprocess.mimic import sort_records_by_npz
 
 
 def main():
@@ -53,7 +49,8 @@ def main():
     with open(config_path, "rb") as f:
         config = tomllib.load(f)
 
-    dataset_dir = get_dataset_path()
+    spec = get_spec(config)
+    dataset_dir = get_dataset_path(config)
     fs = config["data"]["sampling_rate"]
     batch_size = config["training"]["batch_size"]
     _device_cfg = config["training"]["device"]
@@ -61,6 +58,9 @@ def main():
         _device_cfg = "cuda"
     device = torch.device(_device_cfg)
     output_dir = Path(config["artifacts"]["output_dir"])
+    if config["data"].get("name") == "mimic-iv-ecg":
+        output_dir = output_dir / "mimic"
+    output_dir.mkdir(parents=True, exist_ok=True)
     weights_path = output_dir / config["artifacts"]["weights_file"]
     norm_stats_path = output_dir / config["artifacts"]["norm_stats_file"]
     metrics_path = output_dir / "metrics.json"
@@ -101,22 +101,19 @@ def main():
         test_records = [tuple(r) for r in _splits["test"]]
     else:
         print("Building dataset splits (slow — run train_vae.py first to cache)...")
-        _, _, test_records = build_splits(config, dataset_dir=dataset_dir)
+        _, _, test_records = spec.build_splits_fn(config, dataset_dir=dataset_dir)
 
-    print(f"Test set: {len(test_records)} records")
+    test_records = sort_records_by_npz(test_records)
+    print(f"Test set: {len(test_records)} records (sorted by npz for sequential I/O)")
 
-    print("Preloading test signals into RAM...")
-    t0 = time.time()
-    test_ds = PTBXLDataset(test_records, dataset_dir, norm_stats=norm_stats, fs=fs)
-    print(f"  {len(test_ds)} signals loaded ({test_ds.signals.nbytes / 1e6:.0f} MB) in {time.time()-t0:.1f}s")
-
+    test_ds = spec.dataset_class(test_records, dataset_dir, norm_stats=norm_stats)
     pin_memory = torch.cuda.is_available()
-    test_loader = DataLoader(test_ds, batch_size=batch_size, shuffle=False, num_workers=0, pin_memory=pin_memory)
+    test_loader = DataLoader(test_ds, batch_size=batch_size, shuffle=False, num_workers=4, pin_memory=pin_memory)
 
     # Run inference
     all_scores, all_labels = [], []
     with torch.no_grad():
-        for signals, labels in test_loader:
+        for signals, labels in tqdm(test_loader, desc="VAE eval", unit="batch"):
             signals = signals.to(device)
             scores = model.anomaly_score(signals)
             all_scores.extend(scores.cpu().numpy().tolist())
@@ -126,7 +123,7 @@ def main():
     all_labels = np.array(all_labels)
 
     # Binary labels: NORM=0, everything else=1
-    binary_labels = (all_labels != "NORM").astype(int)
+    binary_labels = (all_labels != spec.normal_label).astype(int)
 
     # --- AUROC ---
     auroc = float(roc_auc_score(binary_labels, all_scores))
@@ -150,7 +147,7 @@ def main():
 
     # --- Per-class score distribution ---
     fig, ax = plt.subplots(figsize=(9, 5))
-    for cls, color in CLASS_COLORS.items():
+    for cls, color in spec.class_colors.items():
         mask = all_labels == cls
         if mask.sum() == 0:
             continue
@@ -173,17 +170,56 @@ def main():
     plt.close(fig)
     print(f"Score distribution saved to {dist_path}")
 
+    # --- Per-class one-vs-rest AUROC ---
+    per_class_auroc: dict[str, float] = {}
+    for cls in spec.class_colors:
+        if cls == spec.normal_label:
+            continue
+        mask = (all_labels == spec.normal_label) | (all_labels == cls)
+        if mask.sum() == 0:
+            continue
+        y_true = (all_labels[mask] == cls).astype(int)
+        y_score = all_scores[mask]
+        if y_true.sum() == 0:
+            continue
+        per_class_auroc[cls] = float(roc_auc_score(y_true, y_score))
+        print(f"  AUROC {cls} vs NORM: {per_class_auroc[cls]:.4f}")
+
+    # Per-class AUROC bar chart
+    if per_class_auroc:
+        fig, ax = plt.subplots(figsize=(7, 4))
+        cls_colors = [spec.class_colors[c] for c in per_class_auroc]
+        bars = ax.bar(list(per_class_auroc.keys()), list(per_class_auroc.values()),
+                      color=cls_colors, alpha=0.85, width=0.5)
+        ax.axhline(0.5, color="gray", linestyle="--", lw=1, label="Random (0.5)")
+        ax.set_ylim(0, 1.05)
+        ax.set_ylabel("AUROC (one-vs-NORM)")
+        ax.set_title("VAE Per-Class AUROC")
+        ax.legend(fontsize=8)
+        ax.grid(axis="y", alpha=0.3)
+        for bar, val in zip(bars, per_class_auroc.values()):
+            ax.text(bar.get_x() + bar.get_width() / 2, val + 0.02,
+                    f"{val:.3f}", ha="center", va="bottom", fontsize=9)
+        per_class_path = output_dir / "vae_per_class_auroc.png"
+        fig.savefig(per_class_path, dpi=150, bbox_inches="tight")
+        plt.close(fig)
+        print(f"Per-class AUROC chart saved to {per_class_path}")
+
     # --- Save metrics.json ---
-    metrics = {
-        "VAE": {
-            "auroc": auroc,
-            "pr_auc": pr_auc,
-            "threshold": threshold,
-            "threshold_percentile": threshold_percentile,
-        }
+    existing_metrics: dict = {}
+    if metrics_path.exists():
+        with open(metrics_path) as f:
+            existing_metrics = json.load(f)
+
+    existing_metrics["VAE"] = {
+        "auroc": auroc,
+        "pr_auc": pr_auc,
+        "threshold": threshold,
+        "threshold_percentile": threshold_percentile,
+        "per_class_auroc": per_class_auroc,
     }
     with open(metrics_path, "w") as f:
-        json.dump(metrics, f, indent=2)
+        json.dump(existing_metrics, f, indent=2)
     print(f"Metrics saved to {metrics_path}")
 
     print("\nEvaluation complete.")

@@ -31,13 +31,9 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 from backend.models.vae import VAE
 from src.data.download_dataset import get_dataset_path
-from backend.preprocess.pipeline import (
-    PTBXLDataset,
-    build_splits,
-    fit_norm_stats,
-    load_norm_stats,
-    save_norm_stats,
-)
+from backend.preprocess.registry import get_spec
+from backend.preprocess.pipeline import load_norm_stats, save_norm_stats
+from backend.preprocess.mimic import sort_records_by_npz
 
 
 def vae_loss(x_recon: torch.Tensor, x: torch.Tensor, mu: torch.Tensor,
@@ -61,7 +57,8 @@ def main():
     with open(config_path, "rb") as f:
         config = tomllib.load(f)
 
-    dataset_dir = get_dataset_path()
+    spec = get_spec(config)
+    dataset_dir = get_dataset_path(config)
     fs = config["data"]["sampling_rate"]
     epochs = config["training"]["epochs"]
     batch_size = config["training"]["batch_size"]
@@ -74,6 +71,9 @@ def main():
     beta = config["model"]["beta"]
     percentile = config["anomaly"]["threshold_percentile"]
     output_dir = Path(config["artifacts"]["output_dir"])
+    if config["data"].get("name") == "mimic-iv-ecg":
+        output_dir = output_dir / "mimic"
+    output_dir.mkdir(parents=True, exist_ok=True)
     weights_file = output_dir / config["artifacts"]["weights_file"]
     loss_file = output_dir / config["artifacts"]["loss_file"]
     norm_stats_path = output_dir / config["artifacts"]["norm_stats_file"]
@@ -99,7 +99,7 @@ def main():
         val_records = [tuple(r) for r in _splits["val"]]
     else:
         print("Building dataset splits...")
-        train_records, val_records, test_records = build_splits(config, dataset_dir=dataset_dir)
+        train_records, val_records, test_records = spec.build_splits_fn(config, dataset_dir=dataset_dir)
         with open(splits_cache, "w") as f:
             json.dump({"train": train_records, "val": val_records, "test": test_records}, f)
         print(f"  Splits cached to {splits_cache}")
@@ -116,19 +116,22 @@ def main():
         norm_stats = load_norm_stats(str(norm_stats_path))
     else:
         print("Computing normalization stats from training split...")
-        norm_stats = fit_norm_stats(train_records, dataset_dir, fs=fs)
+        norm_stats = spec.fit_norm_stats_fn(train_records, dataset_dir)
         save_norm_stats(norm_stats, str(norm_stats_path))
         print(f"  Saved to {norm_stats_path}")
 
-    print("Preloading train signals into RAM...")
-    train_ds = PTBXLDataset(train_records, dataset_dir, norm_stats=norm_stats, fs=fs)
-    print(f"  Train: {len(train_ds)} signals loaded ({train_ds.signals.nbytes / 1e6:.0f} MB)")
-    print("Preloading val signals into RAM...")
-    val_ds = PTBXLDataset(val_records, dataset_dir, norm_stats=norm_stats, fs=fs)
-    print(f"  Val: {len(val_ds)} signals loaded ({val_ds.signals.nbytes / 1e6:.0f} MB)")
+    # Sort by npz path so prefetch reads each file sequentially (801 opens vs 74K)
+    train_records = sort_records_by_npz(train_records)
+    train_ds = spec.dataset_class(train_records, dataset_dir, norm_stats=norm_stats)
+    val_ds = spec.dataset_class(val_records, dataset_dir, norm_stats=norm_stats)
+    if hasattr(train_ds, "prefetch"):
+        train_ds.prefetch()
+    if hasattr(val_ds, "prefetch"):
+        val_ds.prefetch()
 
     pin_memory = torch.cuda.is_available()
-    train_loader = DataLoader(train_ds, batch_size=batch_size, shuffle=True, num_workers=0, pin_memory=pin_memory)
+    # shuffle=False because records are pre-sorted by npz file for sequential I/O
+    train_loader = DataLoader(train_ds, batch_size=batch_size, shuffle=False, num_workers=0, pin_memory=pin_memory)
     val_loader = DataLoader(val_ds, batch_size=batch_size, shuffle=False, num_workers=0, pin_memory=pin_memory)
 
     model = VAE(config).to(device)
@@ -150,7 +153,9 @@ def main():
         epoch_train_loss = 0.0
         epoch_recon_loss = 0.0
         epoch_kl_loss = 0.0
-        for signals, _ in train_loader:
+        n_batches = len(train_loader)
+        log_every = max(1, n_batches // 10)  # print ~10 times per epoch
+        for batch_idx, (signals, _) in enumerate(train_loader, 1):
             signals = signals.to(device)
             optimizer.zero_grad()
             x_recon, mu, logvar = model(signals)
@@ -162,6 +167,12 @@ def main():
             epoch_train_loss += loss.item() * n
             epoch_recon_loss += recon.item() * n
             epoch_kl_loss += kl.item() * n
+            if batch_idx % log_every == 0 or batch_idx == n_batches:
+                print(
+                    f"  Epoch {epoch}/{epochs} batch {batch_idx}/{n_batches} "
+                    f"loss={loss.item():.4f} recon={recon.item():.4f} kl={kl.item():.4f}",
+                    flush=True,
+                )
         epoch_train_loss /= len(train_ds)
         epoch_recon_loss /= len(train_ds)
         epoch_kl_loss /= len(train_ds)

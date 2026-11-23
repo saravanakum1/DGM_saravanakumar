@@ -7,6 +7,7 @@ import torch.nn.functional as F
 
 from backend.models.vae import VAE
 from backend.models.ddpm import DDPM
+from backend.models.flow_matching import FlowMatching
 
 
 def load_models(config: dict, artifacts_dir: Path, device: torch.device) -> dict:
@@ -27,6 +28,21 @@ def load_models(config: dict, artifacts_dir: Path, device: torch.device) -> dict
         ddpm.eval()
         ddpm.to(device)
         models["DDPM"] = ddpm
+
+    fm_path = artifacts_dir / "fm_ema_weights.pt"
+    if fm_path.exists():
+        fm_cfg = config.get("flow_matching", {})
+        seq_len = config.get("data", {}).get("sampling_rate", 500) * 10
+        fm = FlowMatching(
+            time_dim=fm_cfg.get("time_dim", 128),
+            num_steps=fm_cfg.get("num_steps", 50),
+            n_hutchinson=fm_cfg.get("n_hutchinson", 1),
+            seq_len=seq_len,
+        )
+        fm.load_state_dict(torch.load(fm_path, map_location=device, weights_only=True))
+        fm.eval()
+        fm.to(device)
+        models["FM"] = fm
 
     return models
 
@@ -66,6 +82,18 @@ def run_inference(
         results["DDPM"] = {
             "anomaly_score": score,
             "heatmap": heatmap,
+            "inference_ms": elapsed_ms,
+        }
+
+    if "FM" in models:
+        model = models["FM"]
+        t0 = time.time()
+        scores, heatmap = model.anomaly_score(x)
+        score = float(scores[0].cpu())
+        elapsed_ms = int((time.time() - t0) * 1000)
+        results["FM"] = {
+            "anomaly_score": score,
+            "heatmap": heatmap.numpy(),
             "inference_ms": elapsed_ms,
         }
 

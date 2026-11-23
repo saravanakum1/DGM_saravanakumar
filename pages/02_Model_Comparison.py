@@ -30,7 +30,9 @@ if not metrics:
     st.warning("No metrics.json found. Run eval_vae.py and eval_ddpm.py first.")
     st.stop()
 
-tab_metrics, tab_radar, tab_dist = st.tabs(["Metrics", "Radar Chart", "Score Distribution"])
+tab_metrics, tab_per_class, tab_radar, tab_dist = st.tabs(["Metrics", "Per-Class Best Model", "Radar Chart", "Score Distribution"])
+
+MODEL_COLORS = {"VAE": "#3B82F6", "DDPM": "#EF4444", "FM": "#8B5CF6"}
 
 with tab_metrics:
     st.subheader("Pre-computed Evaluation Metrics")
@@ -65,13 +67,73 @@ with tab_metrics:
                 f"inference={res['inference_ms']} ms"
             )
 
+with tab_per_class:
+    st.subheader("Per-Class AUROC: Which Model Wins?")
+    st.caption("One-vs-NORM AUROC per anomaly class. The highest-scoring model for each class is the recommended detector.")
+
+    # Collect per-class AUROC across all models that have it
+    all_classes = set()
+    per_class_data: dict[str, dict[str, float]] = {}  # class -> {model -> auroc}
+    for model_name, m in metrics.items():
+        for cls, val in m.get("per_class_auroc", {}).items():
+            all_classes.add(cls)
+            per_class_data.setdefault(cls, {})[model_name] = val
+
+    if not per_class_data:
+        st.info("No per-class AUROC data found. Run eval scripts to generate metrics.json with per_class_auroc.")
+    else:
+        classes = sorted(all_classes)
+        model_names_with_class = sorted({m for v in per_class_data.values() for m in v})
+
+        # Grouped bar chart: one group per class, one bar per model
+        bar_fig2 = go.Figure()
+        for model_name in model_names_with_class:
+            vals = [per_class_data.get(cls, {}).get(model_name, None) for cls in classes]
+            bar_fig2.add_trace(go.Bar(
+                name=model_name,
+                x=classes,
+                y=vals,
+                marker_color=MODEL_COLORS.get(model_name, "#6B7280"),
+            ))
+        bar_fig2.update_layout(
+            barmode="group",
+            yaxis=dict(range=[0, 1], title="AUROC (one-vs-NORM)"),
+            xaxis_title="Anomaly Class",
+            title="Per-Class AUROC by Model",
+            height=400,
+            legend=dict(x=0.01, y=0.99),
+        )
+        bar_fig2.add_hline(y=0.5, line_dash="dot", line_color="gray", annotation_text="Random (0.5)")
+        st.plotly_chart(bar_fig2, use_container_width=True)
+
+        # Winner table
+        st.subheader("Best Model per Class")
+        cols = st.columns(len(classes))
+        for col, cls in zip(cols, classes):
+            class_scores = per_class_data.get(cls, {})
+            if not class_scores:
+                continue
+            best_model = max(class_scores, key=class_scores.get)
+            best_score = class_scores[best_model]
+            color = MODEL_COLORS.get(best_model, "#6B7280")
+            col.markdown(
+                f"**{cls}**  \n"
+                f"<span style='background:{color};color:white;padding:2px 8px;border-radius:4px;font-weight:bold'>{best_model}</span>  \n"
+                f"AUROC: `{best_score:.3f}`",
+                unsafe_allow_html=True,
+            )
+            # Show all models ranked
+            ranked = sorted(class_scores.items(), key=lambda x: x[1], reverse=True)
+            for rank, (mn, sc) in enumerate(ranked, 1):
+                col.caption(f"{rank}. {mn}: {sc:.3f}")
+
 with tab_radar:
     st.subheader("Model Radar Chart")
     model_names = list(metrics.keys())
     axes = ["AUROC", "PR-AUC", "Speed"]
 
     radar_fig = go.Figure()
-    colors = ["#3B82F6", "#EF4444", "#22C55E"]
+    colors = ["#3B82F6", "#EF4444", "#8B5CF6"]
     for i, model_name in enumerate(model_names):
         m = metrics[model_name]
         values = [
@@ -100,21 +162,16 @@ with tab_radar:
 
 with tab_dist:
     st.subheader("Score Distribution Plots")
-    vae_img = ARTIFACTS / "vae_score_distribution.png"
-    ddpm_img = ARTIFACTS / "ddpm_score_distribution.png"
+    dist_imgs = {
+        "VAE": ARTIFACTS / "vae_score_distribution.png",
+        "DDPM": ARTIFACTS / "ddpm_score_distribution.png",
+        "FM": ARTIFACTS / "fm_score_distribution.png",
+    }
+    available = {k: v for k, v in dist_imgs.items() if v.exists()}
 
-    has_any = vae_img.exists() or ddpm_img.exists()
-    if not has_any:
-        st.info("Score distribution images not found. Run eval_vae.py and eval_ddpm.py to generate them.")
+    if not available:
+        st.info("Score distribution images not found. Run eval scripts to generate them.")
     else:
-        col1, col2 = st.columns(2)
-        with col1:
-            if vae_img.exists():
-                st.image(str(vae_img), caption="VAE Score Distribution", use_container_width=True)
-            else:
-                st.info("VAE score distribution image not found.")
-        with col2:
-            if ddpm_img.exists():
-                st.image(str(ddpm_img), caption="DDPM Score Distribution", use_container_width=True)
-            else:
-                st.info("DDPM score distribution image not found.")
+        cols = st.columns(len(available))
+        for col, (model_name, img_path) in zip(cols, available.items()):
+            col.image(str(img_path), caption=f"{model_name} Score Distribution", use_container_width=True)

@@ -53,18 +53,26 @@ def ddpm_param_count(config):
     return sum(p.numel() for p in m.unet.parameters())
 
 
+def fm_param_count(config):
+    from backend.models.flow_matching import FlowMatching
+    fm_cfg = config.get("flow_matching", {})
+    m = FlowMatching(time_dim=fm_cfg.get("time_dim", 128))
+    return sum(p.numel() for p in m.parameters())
+
+
 config = load_config()
 norm_stats = load_norm_stats_data()
 
-selected_model = st.selectbox("Select Model", ["VAE", "DDPM"])
-model_lower = selected_model.lower()
+selected_model = st.selectbox("Select Model", ["VAE", "DDPM", "FM"])
+model_lower = "fm" if selected_model == "FM" else selected_model.lower()
 
 loss_data = load_loss(model_lower)
 
 st.subheader("Loss Curve")
 if loss_data:
-    train_loss = loss_data.get("train_loss", [])
-    val_loss = loss_data.get("val_loss", [])
+    # FM uses keys "train"/"val"; VAE/DDPM use "train_loss"/"val_loss"
+    train_loss = loss_data.get("train_loss") or loss_data.get("train", [])
+    val_loss = loss_data.get("val_loss") or loss_data.get("val", [])
     epochs = list(range(1, len(train_loss) + 1))
 
     fig = go.Figure()
@@ -138,6 +146,30 @@ elif selected_model == "DDPM":
         "Threshold pct": f"{norm_stats.get('ddpm_threshold_percentile', config['anomaly']['threshold_percentile'])}th",
     }
 
+elif selected_model == "FM":
+    fm_cfg = config.get("flow_matching", {})
+    try:
+        n_params = fm_param_count(config)
+        param_str = f"{n_params:,}"
+    except Exception:
+        param_str = "N/A"
+
+    info = {
+        "Architecture": "1D U-Net velocity field (Conditional Flow Matching, straight paths)",
+        "Scoring method": "CFM reconstruction error E[||v_θ(x_t,t) − (x−z)||²]",
+        "Time embedding dim": fm_cfg.get("time_dim", 128),
+        "ODE steps (generation)": fm_cfg.get("num_steps", 50),
+        "Score samples (eval)": fm_cfg.get("score_samples", 20),
+        "EMA decay": fm_cfg.get("ema_decay", 0.9999),
+        "Parameters": param_str,
+        "Epochs": fm_cfg.get("epochs", "N/A"),
+        "Batch size": fm_cfg.get("batch_size", "N/A"),
+        "Learning rate": fm_cfg.get("lr", "N/A"),
+        "Grad clip": fm_cfg.get("grad_clip", "N/A"),
+        "Threshold": f"{norm_stats.get('fm_threshold', 'N/A'):.4f}" if norm_stats.get("fm_threshold") else "N/A",
+        "Threshold pct": f"{fm_cfg.get('threshold_percentile', config['anomaly']['threshold_percentile'])}th",
+    }
+
 for k, v in info.items():
     col1, col2 = st.columns([1, 2])
     with col1:
@@ -153,3 +185,12 @@ if selected_model == "VAE":
         "This visualization requires loading the full test set through the encoder — "
         "use the Upload & Analyze page to inspect individual samples."
     )
+
+per_class_img = ARTIFACTS / f"{model_lower}_per_class_auroc.png"
+eval_script = {"vae": "eval_vae.py", "ddpm": "eval_ddpm.py", "fm": "eval_flow_matching.py"}[model_lower]
+st.divider()
+st.subheader("Per-Class AUROC")
+if per_class_img.exists():
+    st.image(str(per_class_img), caption=f"{selected_model} Per-Class AUROC (one-vs-NORM)", use_container_width=True)
+else:
+    st.info(f"Run src/eval/{eval_script} to generate the per-class AUROC chart.")

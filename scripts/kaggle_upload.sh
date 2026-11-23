@@ -26,11 +26,26 @@ mkdir -p "$STAGING/artifacts"
 
 # Source files and dirs to include
 cp config.toml pyproject.toml "$STAGING/"
-cp -r src backend "$STAGING/"
+cp -r src backend scripts pages components "$STAGING/"
+[ -f app.py ] && cp app.py "$STAGING/"
 
-# Small artifacts only (JSON, not weights/plots)
+# Artifacts: JSON + weights (.pt), exclude plots (.png)
 if ls artifacts/*.json 1>/dev/null 2>&1; then
     cp artifacts/*.json "$STAGING/artifacts/"
+fi
+if ls artifacts/*.pt 1>/dev/null 2>&1; then
+    cp artifacts/*.pt "$STAGING/artifacts/"
+fi
+
+# MIMIC artifacts subfolder: JSON + weights, exclude plots
+if [ -d artifacts/mimic ]; then
+    mkdir -p "$STAGING/artifacts/mimic"
+    if ls artifacts/mimic/*.json 1>/dev/null 2>&1; then
+        cp artifacts/mimic/*.json "$STAGING/artifacts/mimic/"
+    fi
+    if ls artifacts/mimic/*.pt 1>/dev/null 2>&1; then
+        cp artifacts/mimic/*.pt "$STAGING/artifacts/mimic/"
+    fi
 fi
 
 # Include dataset/ only if --dataset flag passed

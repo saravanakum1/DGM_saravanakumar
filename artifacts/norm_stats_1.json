@@ -28,5 +28,7 @@
     0.17581906914710999
   ],
   "threshold": 1.2148730158805847,
-  "threshold_percentile": 95
+  "threshold_percentile": 95,
+  "fm_threshold": 0.5946874022483826,
+  "ddpm_threshold": 0.23563364893198013
 }

@@ -4,10 +4,11 @@ import torch.nn.functional as F
 
 
 class Encoder(nn.Module):
-    """1D CNN encoder: (batch, 12, 1000) -> mu, logvar of shape (batch, latent_dim)."""
+    """1D CNN encoder: (batch, 12, seq_len) -> mu, logvar of shape (batch, latent_dim)."""
 
-    def __init__(self, latent_dim: int, channels: list[int], kernels: list[int], strides: list[int]):
+    def __init__(self, latent_dim: int, channels: list[int], kernels: list[int], strides: list[int], seq_len: int = 5000):
         super().__init__()
+        self._seq_len = seq_len
         in_ch = 12
         layers = []
         all_out = list(channels)
@@ -18,9 +19,9 @@ class Encoder(nn.Module):
             in_ch = out_ch
         self.conv = nn.Sequential(*layers)
 
-        # Compute flattened size with a dummy forward pass
+        # Compute flattened size with a dummy forward pass using actual seq_len
         with torch.no_grad():
-            dummy = torch.zeros(1, 12, 1000)
+            dummy = torch.zeros(1, 12, seq_len)
             flat_size = self.conv(dummy).numel()
 
         self.fc_mu = nn.Linear(flat_size, latent_dim)
@@ -36,9 +37,9 @@ class Encoder(nn.Module):
 
 
 class Decoder(nn.Module):
-    """1D CNN decoder: (batch, latent_dim) -> (batch, 12, 1000)."""
+    """1D CNN decoder: (batch, latent_dim) -> (batch, 12, seq_len)."""
 
-    def __init__(self, latent_dim: int, channels: list[int], kernels: list[int], strides: list[int], flat_size: int):
+    def __init__(self, latent_dim: int, channels: list[int], kernels: list[int], strides: list[int], flat_size: int, seq_len: int = 5000):
         super().__init__()
         # channels/kernels/strides come in encoder order; reverse for decoder
         dec_channels = list(reversed(channels))   # [128, 64, 32]
@@ -48,6 +49,7 @@ class Decoder(nn.Module):
         self.fc = nn.Linear(latent_dim, flat_size)
         self._reshape_ch = dec_channels[0]
         self._reshape_len = flat_size // dec_channels[0]
+        self._seq_len = seq_len
 
         layers = []
         in_ch = dec_channels[0]
@@ -64,7 +66,7 @@ class Decoder(nn.Module):
         h = h.view(h.size(0), self._reshape_ch, self._reshape_len)
         h = self.deconv(h)
         # Fix off-by-one from strided convolutions
-        h = F.interpolate(h, size=1000, mode="linear", align_corners=False)
+        h = F.interpolate(h, size=self._seq_len, mode="linear", align_corners=False)
         return h
 
 
@@ -82,9 +84,10 @@ class VAE(nn.Module):
         channels: list[int] = list(m["encoder_channels"])
         kernels: list[int] = list(m["encoder_kernels"])
         strides: list[int] = list(m["encoder_strides"])
+        seq_len: int = config.get("data", {}).get("sampling_rate", 500) * 10  # 500Hz×10s=5000, 100Hz×10s=1000
 
-        self.encoder = Encoder(latent_dim, channels, kernels, strides)
-        self.decoder = Decoder(latent_dim, channels, kernels, strides, self.encoder._flat_size)
+        self.encoder = Encoder(latent_dim, channels, kernels, strides, seq_len=seq_len)
+        self.decoder = Decoder(latent_dim, channels, kernels, strides, self.encoder._flat_size, seq_len=seq_len)
         self.latent_dim = latent_dim
 
     def reparameterize(self, mu: torch.Tensor, logvar: torch.Tensor) -> torch.Tensor:

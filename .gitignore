@@ -30,3 +30,5 @@ physionet.org/
 
 # OS
 .DS_Store
+artifacts/mimic/*.pt
+artifacts/mimic/*.zip
