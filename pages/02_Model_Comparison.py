@@ -52,7 +52,7 @@ with tab_metrics:
         title="AUROC vs PR-AUC",
         height=350,
     )
-    st.plotly_chart(bar_fig, use_container_width=True)
+    st.plotly_chart(bar_fig, width="stretch")
 
     if "results" in st.session_state and st.session_state["results"]:
         st.subheader("Live Inference Scores (from Upload & Analyze)")
@@ -104,7 +104,7 @@ with tab_per_class:
             legend=dict(x=0.01, y=0.99),
         )
         bar_fig2.add_hline(y=0.5, line_dash="dot", line_color="gray", annotation_text="Random (0.5)")
-        st.plotly_chart(bar_fig2, use_container_width=True)
+        st.plotly_chart(bar_fig2, width="stretch")
 
         # Winner table
         st.subheader("Best Model per Class")
@@ -158,7 +158,7 @@ with tab_radar:
         showlegend=True,
         height=450,
     )
-    st.plotly_chart(radar_fig, use_container_width=True)
+    st.plotly_chart(radar_fig, width="stretch")
 
 with tab_dist:
     st.subheader("Score Distribution Plots")
@@ -174,4 +174,4 @@ with tab_dist:
     else:
         cols = st.columns(len(available))
         for col, (model_name, img_path) in zip(cols, available.items()):
-            col.image(str(img_path), caption=f"{model_name} Score Distribution", use_container_width=True)
+            col.image(str(img_path), caption=f"{model_name} Score Distribution", width="stretch")

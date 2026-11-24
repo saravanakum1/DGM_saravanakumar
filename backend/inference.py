@@ -28,9 +28,11 @@ def _resolve_weight(local_path: Path, filename: str, dataset_key: str) -> Path:
     try:
         from huggingface_hub import hf_hub_download
         subfolder = _HF_SUBFOLDER.get(dataset_key, "ptbxl")
+        hf_token = os.environ.get("HF_TOKEN") or None
         downloaded = hf_hub_download(
             repo_id=_HF_REPO_ID,
             filename=f"{subfolder}/{filename}",
+            token=hf_token,
         )
         return Path(downloaded)
     except Exception as e:
