@@ -32,3 +32,9 @@ physionet.org/
 .DS_Store
 artifacts/mimic/*.pt
 artifacts/mimic/*.zip
+
+artifacts/mimic/ddpm_ema_weights_best/data/*
+artifacts/mimic/ddpm_ema_weights_best/*
+artifacts/mimic/ddpm_checkpoint/*
+commands.txt
+artifacts/mimic/ddpm_ema_weights/*

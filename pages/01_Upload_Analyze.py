@@ -201,7 +201,7 @@ if analyze:
 
     signal_tensor = torch.from_numpy(signal).unsqueeze(0).float()
 
-    with st.spinner("Running inference..."):
+    with st.spinner("Loading model weights (downloading from HF Hub on first run)..."):
         all_models = _load_models_for(selected_dataset_key, device_str)
         active_models = {k: v for k, v in all_models.items() if k in selected_models}
         if not active_models:
