@@ -104,7 +104,9 @@ with st.sidebar:
 
     art_dir = _ARTIFACTS_DIR.get(selected_dataset_key, ROOT / "artifacts")
     if not any(art_dir.glob("*.pt")):
-        st.warning(f"No model weights found in `{art_dir.relative_to(ROOT)}`. Train the model first.")
+        import os
+        hf_repo = os.environ.get("HF_WEIGHTS_REPO", "sarav95/ecg-anomaly-weights")
+        st.info(f"Model weights will be downloaded from `{hf_repo}` on first inference.")
 
     st.divider()
     st.header("Input")
@@ -148,7 +150,7 @@ with st.sidebar:
     apply_bandpass = st.checkbox("Bandpass filter (0.5–40 Hz)", value=True)
     apply_normalize = st.checkbox("Normalize", value=True)
 
-    analyze = st.button("ANALYZE", type="primary", use_container_width=True)
+    analyze = st.button("ANALYZE", type="primary", width="stretch")
 
 # ---------------------------------------------------------------------------
 # Load signal
@@ -202,7 +204,11 @@ if analyze:
     signal_tensor = torch.from_numpy(signal).unsqueeze(0).float()
 
     with st.spinner("Loading model weights (downloading from HF Hub on first run)..."):
-        all_models = _load_models_for(selected_dataset_key, device_str)
+        try:
+            all_models = _load_models_for(selected_dataset_key, device_str)
+        except RuntimeError as e:
+            st.error(str(e))
+            st.stop()
         active_models = {k: v for k, v in all_models.items() if k in selected_models}
         if not active_models:
             st.error("No model weights found for selected models.")
@@ -228,7 +234,7 @@ if "results" in st.session_state and st.session_state["results"]:
 
     st.subheader("ECG Waveform")
     fig = ecg_viewer(ecg_sig, heatmaps=heatmaps, leads_to_show=leads)
-    st.plotly_chart(fig, use_container_width=True)
+    st.plotly_chart(fig, width="stretch")
 
     st.subheader("Model Results")
     cols = st.columns(len(results))
@@ -257,7 +263,7 @@ if "results" in st.session_state and st.session_state["results"]:
         height=200 + 60 * len(model_names),
         margin=dict(l=60, r=20, t=20, b=40),
     )
-    st.plotly_chart(heat_fig, use_container_width=True)
+    st.plotly_chart(heat_fig, width="stretch")
 
     col1, col2 = st.columns(2)
     with col1:
