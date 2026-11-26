@@ -1,10 +1,14 @@
 [data]
 # Dataset to use. Supported: "ptbxl", "mimic-iv-ecg"
 # Switching this value is the only change needed to train on a different dataset.
-name = "mimic-iv-ecg"
-# On Kaggle: attach sharav95/ecg-npy-batches as input dataset
-dataset_dir = "/kaggle/input/datasets/sharav95/ecg-npy-batches"
+name = "ptbxl"
+# PTB-XL 500Hz
+dataset_dir = "/kaggle/input/datasets/sharav95/ecg-ptbxl-data"
 sampling_rate = 500
+# MIMIC-IV-ECG
+# name = "mimic-iv-ecg"
+# dataset_dir = "/kaggle/input/datasets/sharav95/ecg-npy-batches"
+# sampling_rate = 500
 val_split = 0.1
 
 [model]
@@ -46,7 +50,7 @@ loss_file = "vae_loss.json"
 norm_stats_file = "norm_stats.json"
 
 [flow_matching]
-epochs = 10
+epochs = 20
 batch_size = 64
 lr = 2e-4
 weight_decay = 1e-4

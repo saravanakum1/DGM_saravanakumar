@@ -62,7 +62,8 @@ def _process_one(args: tuple) -> tuple[str, bool, str]:
     try:
         record = wfdb.rdrecord(str(rec_path))
         sig = record.p_signal  # (T, 12)
-        if sig is None or sig.shape != (5000, 12):
+        expected_len = fs * 10  # 500Hz→5000, 100Hz→1000
+        if sig is None or sig.shape != (expected_len, 12):
             return stem, False, f"unexpected shape {sig.shape if sig is not None else None}"
 
         sig = sig.T.astype(np.float64)  # (12, 5000)
@@ -95,6 +96,14 @@ def main():
         help="Parallel worker processes (default: min(cpu_count, 8))"
     )
     parser.add_argument(
+        "--sampling-rate", type=int, default=None,
+        help="Sampling rate: 500 (records500/filename_lr) or 100 (records100/filename_hr). Defaults to config."
+    )
+    parser.add_argument(
+        "--output-dir", default=None,
+        help="Output directory for .npy files. Defaults to <dataset_dir>/npy/"
+    )
+    parser.add_argument(
         "--overwrite", action="store_true",
         help="Re-process records even if .npy already exists"
     )
@@ -112,28 +121,40 @@ def main():
     if not dataset_dir.exists():
         raise FileNotFoundError(f"Dataset dir not found: {dataset_dir}")
 
-    out_dir = dataset_dir / "npy"
-    out_dir.mkdir(exist_ok=True)
+    # Resolve sampling rate and filename column
+    if args.sampling_rate is not None:
+        fs = args.sampling_rate
+    else:
+        config_path = Path(__file__).resolve().parents[1] / "config.toml"
+        with open(config_path, "rb") as f:
+            config = tomllib.load(f)
+        fs = config.get("data", {}).get("sampling_rate", 100)
+
+    # PTB-XL naming: filename_hr = 500Hz (high resolution), filename_lr = 100Hz (low resolution)
+    filename_col = "filename_hr" if fs == 500 else "filename_lr"
+    print(f"Sampling rate: {fs} Hz  (using column: {filename_col})")
+
+    out_dir = Path(args.output_dir) if args.output_dir else dataset_dir / "npy"
+    out_dir.mkdir(parents=True, exist_ok=True)
     print(f"Dataset : {dataset_dir}")
     print(f"Output  : {out_dir}")
     print(f"Workers : {args.workers}")
 
-    # Load CSV and keep records with a valid filename_hr
+    # Load CSV
     df = pd.read_csv(dataset_dir / "ptbxl_database.csv", index_col="ecg_id")
-    df = df[df["filename_hr"].notna()].copy()
-    print(f"Records in CSV with filename_hr: {len(df)}")
+    df = df[df[filename_col].notna()].copy()
+    print(f"Records in CSV with {filename_col}: {len(df)}")
 
     # Build work list — skip existing unless --overwrite
     work = []
     skipped = 0
     for _, row in df.iterrows():
-        rec_path = dataset_dir / row["filename_hr"]
-        stem = Path(row["filename_hr"]).stem   # e.g. "00001_hr"
+        rec_path = dataset_dir / row[filename_col]
+        stem = Path(row[filename_col]).stem   # e.g. "00001_lr" or "00001_hr"
         out_path = out_dir / f"{stem}.npy"
         if out_path.exists() and not args.overwrite:
             skipped += 1
             continue
-        fs = 500
         work.append((rec_path, out_path, fs))
 
     if skipped:

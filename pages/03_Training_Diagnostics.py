@@ -85,7 +85,7 @@ if loss_data:
         height=350,
         legend=dict(x=0.8, y=0.95),
     )
-    st.plotly_chart(fig, use_container_width=True)
+    st.plotly_chart(fig, width="stretch")
 
     col1, col2, col3 = st.columns(3)
     with col1:
@@ -191,6 +191,6 @@ eval_script = {"vae": "eval_vae.py", "ddpm": "eval_ddpm.py", "fm": "eval_flow_ma
 st.divider()
 st.subheader("Per-Class AUROC")
 if per_class_img.exists():
-    st.image(str(per_class_img), caption=f"{selected_model} Per-Class AUROC (one-vs-NORM)", use_container_width=True)
+    st.image(str(per_class_img), caption=f"{selected_model} Per-Class AUROC (one-vs-NORM)", width="stretch")
 else:
     st.info(f"Run src/eval/{eval_script} to generate the per-class AUROC chart.")

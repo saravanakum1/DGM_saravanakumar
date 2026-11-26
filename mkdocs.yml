@@ -46,3 +46,4 @@ nav:
   - Training: training.md
   - Evaluation: evaluation.md
   - Dataset Switching: dataset-switching.md
+  - Deployment: deployment.md

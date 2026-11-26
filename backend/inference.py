@@ -45,6 +45,7 @@ def _resolve_weight(local_path: Path, filename: str, dataset_key: str) -> Path:
 def load_models(config: dict, artifacts_dir: Path, device: torch.device) -> dict:
     dataset_key = config.get("data", {}).get("name", "ptbxl")
     models = {}
+    errors = {}
 
     vae_filename = config["artifacts"]["weights_file"]
     vae_local = artifacts_dir / vae_filename
@@ -55,8 +56,8 @@ def load_models(config: dict, artifacts_dir: Path, device: torch.device) -> dict
         vae.eval()
         vae.to(device)
         models["VAE"] = vae
-    except FileNotFoundError:
-        pass
+    except Exception as e:
+        errors["VAE"] = str(e)
 
     ddpm_local = artifacts_dir / "ddpm_ema_weights.pt"
     try:
@@ -66,8 +67,8 @@ def load_models(config: dict, artifacts_dir: Path, device: torch.device) -> dict
         ddpm.eval()
         ddpm.to(device)
         models["DDPM"] = ddpm
-    except FileNotFoundError:
-        pass
+    except Exception as e:
+        errors["DDPM"] = str(e)
 
     fm_local = artifacts_dir / "fm_ema_weights.pt"
     try:
@@ -84,8 +85,19 @@ def load_models(config: dict, artifacts_dir: Path, device: torch.device) -> dict
         fm.eval()
         fm.to(device)
         models["FM"] = fm
-    except FileNotFoundError:
-        pass
+    except Exception as e:
+        errors["FM"] = str(e)
+
+    if errors:
+        import logging
+        for name, err in errors.items():
+            logging.warning("Could not load %s: %s", name, err)
+
+    if not models:
+        raise RuntimeError(
+            "No model weights could be loaded. Errors:\n"
+            + "\n".join(f"  {k}: {v}" for k, v in errors.items())
+        )
 
     return models
 

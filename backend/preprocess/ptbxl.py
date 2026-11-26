@@ -89,20 +89,26 @@ def build_splits(config: dict, dataset_dir: str | None = None) -> tuple[list, li
     if dataset_dir is None:
         dataset_dir = config["data"]["dataset_dir"]
     val_split = config["data"]["val_split"]
-    npy_dir = Path(dataset_dir) / "npy"
+    # On Kaggle, npy files may be written to working dir since input is read-only
+    kaggle_npy = Path("/kaggle/working/npy")
+    npy_dir = kaggle_npy if kaggle_npy.exists() else Path(dataset_dir) / "npy"
 
     df = pd.read_csv(Path(dataset_dir) / "ptbxl_database.csv", index_col="ecg_id")
     lookup = _load_superclass_lookup(dataset_dir)
     df["superclass"] = df["scp_codes"].apply(lambda x: _aggregate_superclass(x, lookup))
     df = df[df["superclass"].notna()].copy()
 
-    def _npy_path(filename_hr: str) -> str:
-        stem = Path(filename_hr).stem  # e.g. "00001_hr"
+    # PTB-XL naming: filename_hr = 500Hz (high resolution), filename_lr = 100Hz (low resolution)
+    sampling_rate = config.get("data", {}).get("sampling_rate", 100)
+    filename_col = "filename_hr" if sampling_rate == 500 else "filename_lr"
+
+    def _npy_path(filename: str) -> str:
+        stem = Path(filename).stem  # e.g. "00001_lr" or "00001_hr"
         return str(npy_dir / f"{stem}.npy")
 
     # Test set: fold 10, all superclasses
     test_df = df[df["strat_fold"] == 10]
-    test_records = [(_npy_path(row["filename_hr"]), row["superclass"]) for _, row in test_df.iterrows()]
+    test_records = [(_npy_path(row[filename_col]), row["superclass"]) for _, row in test_df.iterrows()]
 
     # Train/val: NORM only, folds 1-9
     norm_pool = df[(df["strat_fold"] != 10) & (df["superclass"] == "NORM")]
@@ -111,8 +117,8 @@ def build_splits(config: dict, dataset_dir: str | None = None) -> tuple[list, li
     val_df = norm_pool.iloc[:n_val]
     train_df = norm_pool.iloc[n_val:]
 
-    train_records = [(_npy_path(row["filename_hr"]), "NORM") for _, row in train_df.iterrows()]
-    val_records = [(_npy_path(row["filename_hr"]), "NORM") for _, row in val_df.iterrows()]
+    train_records = [(_npy_path(row[filename_col]), "NORM") for _, row in train_df.iterrows()]
+    val_records = [(_npy_path(row[filename_col]), "NORM") for _, row in val_df.iterrows()]
 
     return train_records, val_records, test_records
 

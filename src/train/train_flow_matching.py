@@ -87,13 +87,20 @@ def main() -> None:
         artifacts_dir = artifacts_dir / "mimic"
     artifacts_dir.mkdir(parents=True, exist_ok=True)
 
-    device_str = config["training"].get("device", "cpu")
-    if torch.cuda.is_available():
-        device_str = "cuda"
-    elif torch.backends.mps.is_available():
-        device_str = "mps"
-    device = torch.device(device_str)
-    print(f"Device: {device}")
+    try:
+        import torch_xla
+        device = torch_xla.device()
+        _use_xla = True
+        print("Device: TPU (torch_xla)")
+    except ImportError:
+        _use_xla = False
+        device_str = config["training"].get("device", "cpu")
+        if torch.cuda.is_available():
+            device_str = "cuda"
+        elif torch.backends.mps.is_available():
+            device_str = "mps"
+        device = torch.device(device_str)
+        print(f"Device: {device}")
 
     # ------------------------------------------------------------------
     # Step 0 — Splits (load from cache or build once and save)
@@ -146,8 +153,10 @@ def main() -> None:
     fs = config["data"]["sampling_rate"]
     # Sort by npz path so prefetch reads each file sequentially (801 opens vs 74K)
     train_records = sort_records_by_npz(train_records)
-    train_ds = spec.dataset_class(train_records, dataset_dir, norm_stats=norm_stats)
-    val_ds = spec.dataset_class(val_records, dataset_dir, norm_stats=norm_stats)
+    # TPU: disable multiprocessing in dataset loader (XLA forks conflict with TPU runtime)
+    _ds_workers = 1 if _use_xla else None
+    train_ds = spec.dataset_class(train_records, dataset_dir, norm_stats=norm_stats, num_workers=_ds_workers)
+    val_ds = spec.dataset_class(val_records, dataset_dir, norm_stats=norm_stats, num_workers=_ds_workers)
     if hasattr(train_ds, "prefetch"):
         train_ds.prefetch()
     if hasattr(val_ds, "prefetch"):
@@ -158,7 +167,7 @@ def main() -> None:
         batch_size=fm_cfg["batch_size"],
         shuffle=False,  # pre-sorted by npz file for sequential I/O
         num_workers=0,
-        pin_memory=(device.type == "cuda"),
+        pin_memory=(not _use_xla and device.type == "cuda"),
         drop_last=True,
     )
     val_loader = DataLoader(
@@ -166,7 +175,7 @@ def main() -> None:
         batch_size=fm_cfg["batch_size"],
         shuffle=False,
         num_workers=0,
-        pin_memory=(device.type == "cuda"),
+        pin_memory=(not _use_xla and device.type == "cuda"),
     )
 
     # ------------------------------------------------------------------
@@ -228,6 +237,8 @@ def main() -> None:
             loss.backward()
             torch.nn.utils.clip_grad_norm_(model.parameters(), fm_cfg["grad_clip"])
             optimizer.step()
+            if _use_xla:
+                torch_xla.sync()
             ema_update(ema_model, model, fm_cfg["ema_decay"])
             train_losses.append(loss.item())
 
@@ -237,7 +248,10 @@ def main() -> None:
         with torch.no_grad():
             for batch, _ in val_loader:
                 batch = batch.to(device)
-                val_losses.append(model.loss(batch).item())
+                loss_val = model.loss(batch)
+                if _use_xla:
+                    torch_xla.sync()
+                val_losses.append(loss_val.item())
 
         train_loss = float(np.mean(train_losses))
         val_loss = float(np.mean(val_losses))

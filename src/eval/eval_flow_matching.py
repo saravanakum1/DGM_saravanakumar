@@ -70,12 +70,19 @@ def main() -> None:
     fm_cfg = config.get("flow_matching", {})
     batch_size = fm_cfg.get("batch_size", config["training"]["batch_size"])
 
-    _device_cfg = config["training"]["device"]
-    if _device_cfg == "cpu" and torch.cuda.is_available():
-        _device_cfg = "cuda"
-    elif _device_cfg == "cpu" and torch.backends.mps.is_available():
-        _device_cfg = "mps"
-    device = torch.device(_device_cfg)
+    try:
+        import torch_xla
+        device = torch_xla.device()
+        _use_xla = True
+        print("Device: TPU (torch_xla)")
+    except ImportError:
+        _use_xla = False
+        _device_cfg = config["training"]["device"]
+        if _device_cfg == "cpu" and torch.cuda.is_available():
+            _device_cfg = "cuda"
+        elif _device_cfg == "cpu" and torch.backends.mps.is_available():
+            _device_cfg = "mps"
+        device = torch.device(_device_cfg)
 
     output_dir = Path(config["artifacts"]["output_dir"])
     if config["data"].get("name") == "mimic-iv-ecg":
@@ -126,13 +133,14 @@ def main() -> None:
     # ------------------------------------------------------------------
     # Dataset
     # ------------------------------------------------------------------
-    test_ds = spec.dataset_class(test_records, dataset_dir, norm_stats=norm_stats)
+    _ds_workers = 1 if _use_xla else None
+    test_ds = spec.dataset_class(test_records, dataset_dir, norm_stats=norm_stats, num_workers=_ds_workers)
     test_loader = DataLoader(
         test_ds,
         batch_size=batch_size,
         shuffle=False,
-        num_workers=4,
-        pin_memory=(device.type == "cuda"),
+        num_workers=0,
+        pin_memory=(not _use_xla and device.type == "cuda"),
     )
 
     # ------------------------------------------------------------------
